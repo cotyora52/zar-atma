@@ -1,5 +1,7 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:sensors_plus/sensors_plus.dart';
 
 void main() {
   runApp(const DiceApp());
@@ -18,21 +20,109 @@ class DiceApp extends StatelessWidget {
 }
 
 class DicePage extends StatefulWidget {
+  const DicePage({super.key});
+
   @override
-  _DicePageState createState() => _DicePageState();
+  State<DicePage> createState() => DicePageState(); // public tip kullanıyoruz
 }
 
-class _DicePageState extends State<DicePage> {
+class DicePageState extends State<DicePage> with SingleTickerProviderStateMixin {
   final Random _random = Random();
-  int _diceCount = 2; // başlangıçta 2 zar
+  final AudioPlayer _player = AudioPlayer();
+  int _diceCount = 2;
   int _dice1 = 1;
   int _dice2 = 1;
 
-  void _rollDice() {
-    setState(() {
-      _dice1 = _random.nextInt(6) + 1;
-      _dice2 = _random.nextInt(6) + 1;
+  late AnimationController _controller;
+
+  // Shake detection
+  double _lastX = 0, _lastY = 0, _lastZ = 0;
+  final double shakeThreshold = 15.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    );
+
+    // accelerometerEventStream() kullanımı
+    accelerometerEventStream().listen((AccelerometerEvent event) {
+      double deltaX = (event.x - _lastX).abs();
+      double deltaY = (event.y - _lastY).abs();
+      double deltaZ = (event.z - _lastZ).abs();
+
+      if (deltaX + deltaY + deltaZ > shakeThreshold) {
+        _rollDice();
+      }
+
+      _lastX = event.x;
+      _lastY = event.y;
+      _lastZ = event.z;
     });
+  }
+
+  void _rollDice() async {
+    // Sallama sesi
+    _player.play(AssetSource('sounds/shake.mp3'));
+
+    _controller.forward(from: 0);
+
+    Future.delayed(const Duration(milliseconds: 500), () async {
+      setState(() {
+        _dice1 = _random.nextInt(6) + 1;
+        if (_diceCount == 2) {
+          _dice2 = _random.nextInt(6) + 1;
+        }
+      });
+      // Zar vurma sesi
+      await _player.play(AssetSource('sounds/dice_hit.mp3'));
+    });
+  }
+
+  void _selectDiceCount(int count) {
+    setState(() {
+      _diceCount = count;
+      if (count == 1) _dice2 = 1;
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _player.dispose();
+    super.dispose();
+  }
+
+  void _showSettings() {
+    showModalBottomSheet(
+      context: context,
+      builder: (_) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            title: const Text('1 Zar', style: TextStyle(color: Colors.black)),
+            onTap: () {
+              _selectDiceCount(1);
+              Navigator.pop(context);
+            },
+          ),
+          ListTile(
+            title: const Text('2 Zar', style: TextStyle(color: Colors.black)),
+            onTap: () {
+              _selectDiceCount(2);
+              Navigator.pop(context);
+            },
+          ),
+          const Divider(),
+          const ListTile(
+            title: Text('Uygulama Bilgileri', style: TextStyle(color: Colors.black)),
+            subtitle: Text('Tasarım: Cotyora', style: TextStyle(color: Colors.black)),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -41,75 +131,46 @@ class _DicePageState extends State<DicePage> {
       body: GestureDetector(
         onTap: _rollDice,
         onDoubleTap: _rollDice,
-        child: Stack(
+        child: Column(
           children: [
-            Column(
-              children: [
-                Expanded(
-                  child: CustomPaint(
-                    painter: DicePainter(_dice1),
-                    child: Container(),
-                  ),
-                ),
-                if (_diceCount == 2)
-                  Expanded(
+            Expanded(
+              child: AnimatedBuilder(
+                animation: _controller,
+                builder: (context, child) {
+                  double offset = sin(_controller.value * pi * 10) * 10;
+                  return Transform.translate(
+                    offset: Offset(offset, 0),
                     child: CustomPaint(
-                      painter: DicePainter(_dice2),
+                      painter: DicePainter(_dice1),
                       child: Container(),
                     ),
-                  ),
-              ],
-            ),
-            Positioned(
-              right: 16,
-              bottom: 16,
-              child: FloatingActionButton(
-                backgroundColor: Colors.white,  // beyaz arka plan
-                foregroundColor: Colors.grey[800], // ikon rengi gri
-                child: const Icon(Icons.settings),
-                onPressed: () {
-                  showModalBottomSheet(
-                    backgroundColor: Colors.white, // seçenek ekranı beyaz
-                    context: context,
-                    builder: (context) {
-                      return SizedBox(
-                        height: 150,
-                        child: Column(
-                          children: [
-                            ListTile(
-                              title: const Text(
-                                "1 Zar",
-                                style: TextStyle(color: Colors.grey), // gri yazı
-                              ),
-                              onTap: () {
-                                setState(() {
-                                  _diceCount = 1;
-                                });
-                                Navigator.pop(context);
-                              },
-                            ),
-                            ListTile(
-                              title: const Text(
-                                "2 Zar",
-                                style: TextStyle(color: Colors.grey), // gri yazı
-                              ),
-                              onTap: () {
-                                setState(() {
-                                  _diceCount = 2;
-                                });
-                                Navigator.pop(context);
-                              },
-                            ),
-                          ],
-                        ),
-                      );
-                    },
                   );
                 },
               ),
             ),
+            if (_diceCount == 2)
+              Expanded(
+                child: AnimatedBuilder(
+                  animation: _controller,
+                  builder: (context, child) {
+                    double offset = sin(_controller.value * pi * 10) * 10;
+                    return Transform.translate(
+                      offset: Offset(-offset, 0),
+                      child: CustomPaint(
+                        painter: DicePainter(_dice2),
+                        child: Container(),
+                      ),
+                    );
+                  },
+                ),
+              ),
           ],
         ),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _showSettings,
+        backgroundColor: Colors.white,
+        child: const Icon(Icons.settings, color: Colors.grey),
       ),
     );
   }
@@ -123,13 +184,11 @@ class DicePainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final backgroundColor = _getDiceColor(number);
 
-    // Arka plan
     final paint = Paint()
       ..color = backgroundColor
       ..style = PaintingStyle.fill;
     canvas.drawRect(Offset.zero & size, paint);
 
-    // Nokta rengi -> arka planın biraz açık tonu
     final hsl = HSLColor.fromColor(backgroundColor);
     final lighter = hsl
         .withLightness((hsl.lightness + 0.2).clamp(0.0, 1.0))
@@ -139,13 +198,9 @@ class DicePainter extends CustomPainter {
       ..color = lighter
       ..style = PaintingStyle.fill;
 
-    // Nokta yarıçapı → ekran kısa kenarının 1/18'i
     final double r = size.shortestSide / 18;
-
     final cx = size.width / 2;
     final cy = size.height / 2;
-
-    // Kare içine yerleştirme
     final double squareOffsetX = size.width / 6;
     final double squareOffsetY = size.height / 6;
 
@@ -191,17 +246,17 @@ class DicePainter extends CustomPainter {
   Color _getDiceColor(int number) {
     switch (number) {
       case 1:
-        return const Color(0xFFE53935); // Warm Red
+        return const Color(0xFFE53935);
       case 2:
-        return const Color(0xFFFFB300); // Bright Yellow
+        return const Color(0xFFFFB300);
       case 3:
-        return const Color(0xFF1565C0); // Deep Blue
+        return const Color(0xFF1565C0);
       case 4:
-        return const Color(0xFFFB8C00); // Vibrant Orange
+        return const Color(0xFFFB8C00);
       case 5:
-        return const Color(0xFF2E7D32); // Emerald Green
+        return const Color(0xFF2E7D32);
       case 6:
-        return const Color(0xFF9575CD); // Lilac
+        return const Color(0xFF9575CD);
       default:
         return Colors.grey;
     }
